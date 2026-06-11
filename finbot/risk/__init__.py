@@ -1,5 +1,4 @@
-from finbot.risk.covariance import ewma_covariance
-from finbot.risk.drawdown import drawdown_multiplier
+from finbot.risk.covariance import blended_vol, build_covariance, ewma_correlation
 from finbot.risk.vol_target import vol_target_leverage
 
-__all__ = ["ewma_covariance", "vol_target_leverage", "drawdown_multiplier"]
+__all__ = ["blended_vol", "ewma_correlation", "build_covariance", "vol_target_leverage"]

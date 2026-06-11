@@ -1,4 +1,5 @@
-from finbot.signals.ensemble import combined_signal
-from finbot.signals.momentum import ts_momentum, xs_momentum
+from finbot.signals.carry import carry_signal
+from finbot.signals.ensemble import combined_forecast, scale_forecast
+from finbot.signals.trend import ewmac_trend
 
-__all__ = ["ts_momentum", "xs_momentum", "combined_signal"]
+__all__ = ["ewmac_trend", "carry_signal", "combined_forecast", "scale_forecast"]

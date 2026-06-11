@@ -1,11 +1,12 @@
 """ウォークフォワード(ローリング・アウトオブサンプル)評価。
 
-インサンプルのバックテストは選択バイアスでシャープが膨らむ。
-ここでは各フォールドで「学習窓のシャープが最良のパラメータ」を選び、
-それを直後のテスト窓に適用した OOS リターンだけを連結して評価する。
-報告すべき(=信頼に足る)シャープレシオはこの OOS 値。
+v2 での位置づけ: ウォークフォワードは false discovery の防止では
+CPCV に劣る(合成環境の比較実験で最弱)ため、モデル選択には
+cpcv を使い、こちらは「時系列順の現実的シミュレーション」として
+最終確認に用いる(docs/DESIGN_V2.md §7)。
 
-パラメータグリッドは過学習を避けるため意図的に小さくしてある。
+各フォールドで「学習窓のシャープが最良のパラメータ」を選び、
+それを直後のテスト窓に適用した OOS リターンだけを連結して評価する。
 """
 
 from __future__ import annotations
@@ -15,16 +16,9 @@ from dataclasses import dataclass
 import pandas as pd
 
 from finbot.backtest.engine import run_backtest
+from finbot.backtest.grid import DEFAULT_GRID
 from finbot.backtest.metrics import summary
 from finbot.config import BotConfig
-
-DEFAULT_GRID: tuple[dict, ...] = (
-    {"momentum_lookbacks": (21, 63, 126, 252)},
-    {"momentum_lookbacks": (63, 126, 252)},
-    {"momentum_lookbacks": (21, 63)},
-    {"momentum_lookbacks": (21, 63, 126, 252), "target_vol": 0.08},
-    {"momentum_lookbacks": (21, 63, 126, 252), "target_vol": 0.12},
-)
 
 
 @dataclass
@@ -40,6 +34,7 @@ def run_walkforward(
     train_days: int = 756,
     test_days: int = 252,
     grid: tuple[dict, ...] = DEFAULT_GRID,
+    carry: pd.DataFrame | None = None,
 ) -> WalkForwardResult:
     oos_parts: list[pd.Series] = []
     folds: list[dict] = []
@@ -54,12 +49,12 @@ def run_walkforward(
 
         best_sharpe, best_params = -float("inf"), grid[0]
         for params in grid:
-            res = run_backtest(train, cfg.with_overrides(**params))
+            res = run_backtest(train, cfg.with_overrides(**params), carry=carry)
             if res.stats["sharpe"] > best_sharpe:
                 best_sharpe, best_params = res.stats["sharpe"], params
 
         oos_cfg = cfg.with_overrides(**best_params)
-        oos_res = run_backtest(test_ctx, oos_cfg)
+        oos_res = run_backtest(test_ctx, oos_cfg, carry=carry)
         oos = oos_res.returns.loc[prices.index[test_begin] :]
         oos_parts.append(oos)
         folds.append(

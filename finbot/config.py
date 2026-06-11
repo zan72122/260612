@@ -1,7 +1,9 @@
-"""ボット全体の設定。
+"""ボット全体の設定(設計方針 v2: docs/DESIGN_V2.md)。
 
-戦略パラメータは「予測精度」ではなく「リスク管理」に寄せてあり、
-過学習を避けるため自由度を意図的に小さくしている。
+パラメータは「最良値の探索」ではなく文献の標準値に固定してある
+(Baz et al. 2015 のトレンド構成、Carver のフォーキャスト規約、
+Barra 流のボラ/相関分離推定)。自由度を増やすと多重検定の
+デフレーション(DSR)で罰されることに注意。
 """
 
 from __future__ import annotations
@@ -26,38 +28,51 @@ class BotConfig:
     # ユニバース
     universe: Sequence[str] = field(default_factory=lambda: DEFAULT_UNIVERSE)
 
-    # シグナル: 時系列モメンタムのルックバック(営業日)
-    momentum_lookbacks: Sequence[int] = (21, 63, 126, 252)
-    # クロスセクショナル・モメンタムのルックバック
-    xs_lookback: int = 126
-    # 時系列モメンタムとクロスセクショナルの混合比(ts の重み)
-    ts_weight: float = 0.7
+    # --- シグナル: トレンド(Baz et al. 2015 EWMAC) ---
+    # タイムスケールペア (S, L)。HL = log(0.5)/log(1-1/n) で EWMA の halflife に変換。
+    trend_pairs: Sequence[tuple[int, int]] = ((8, 24), (16, 48), (32, 96))
+    trend_price_vol_window: int = 63    # 1段目正規化: 価格の rolling std 窓
+    trend_signal_vol_window: int = 252  # 2段目正規化: シグナルの rolling std 窓
 
-    # リスクモデル
-    vol_span: int = 60          # 資産別 EWMA ボラの span(営業日)
-    cov_span: int = 120         # EWMA 共分散の span
-    target_vol: float = 0.10    # ポートフォリオ目標ボラ(年率)
-    max_leverage: float = 1.5   # グロスレバレッジ上限
-    max_weight: float = 0.30    # 1資産あたり |weight| 上限
+    # --- シグナル: キャリー ---
+    carry_smooth_span: int = 90   # キャリーの EWMA 平滑化(ターンオーバー削減)
 
-    # ドローダウン・ブレーキ
-    dd_threshold: float = 0.08  # この深さを超えるDDでエクスポージャ縮小開始
-    dd_full_cut: float = 0.20   # この深さで最小エクスポージャに到達
-    dd_min_exposure: float = 0.25
+    # --- フォーキャスト統合層(Carver 規約) ---
+    forecast_abs_target: float = 10.0   # E|forecast| の目標
+    forecast_cap: float = 20.0          # フォーキャストの上限(±)
+    forecast_scale_burn: int = 63       # スケーラ推定の最低観測日数(因果的 expanding)
+    trend_weight: float = 0.6           # トレンド:キャリー = 60:40
+    carry_weight: float = 0.4
+    fdm: float = 1.15                   # フォーキャスト分散乗数(低相関 2 ルールの標準値)
 
-    # 執行・コスト
-    cost_bps: float = 5.0          # 片道取引コスト(bps)
-    rebalance_band: float = 0.05   # 目標との最大乖離がこれ以下なら取引しない
-    weight_smooth_span: int = 5    # 目標ウェイトの EWMA 平滑化(ターンオーバー抑制)
+    # --- リスクモデル(ボラと相関の分離推定) ---
+    vol_halflife: int = 20          # 短期 EWMA ボラの halflife(営業日)
+    vol_blend: float = 0.7          # 短期ボラの重み(残りは長期アンカー)
+    vol_long_min_periods: int = 252  # 長期アンカーの最低観測日数
+    corr_halflife: int = 200        # 相関 EWMA の halflife(ボラより遅く推定)
+    corr_shrinkage: float = 0.2     # 定相関ターゲットへの線形シュリンク係数
+    target_vol: float = 0.10        # ポートフォリオ目標ボラ(年率)
+    max_leverage: float = 2.0       # グロスレバレッジ上限
+    max_weight: float = 0.30        # 1資産あたり |weight| 上限
 
-    # 評価
+    # --- 執行・コスト ---
+    cost_bps: float = 2.0          # 片道取引コスト(bps)。流動性の高いETF水準
+    buffer_frac: float = 0.10      # ポジションバッファ半幅(平均ポジション比)
+    weight_smooth_span: int = 5    # 目標の部分調整(EWMA 平滑化 ≒ Garleanu-Pedersen)
+
+    # --- 評価 ---
     rf_rate: float = 0.0         # 年率無リスク金利(シャープ計算用)
     trading_days: int = 252
 
     # ウォームアップ(シグナル成立に必要な最低履歴日数)
     @property
     def warmup(self) -> int:
-        return max(max(self.momentum_lookbacks), self.xs_lookback, self.cov_span) + 5
+        return (
+            self.trend_price_vol_window
+            + self.trend_signal_vol_window
+            + self.forecast_scale_burn
+            + 10
+        )
 
     def with_overrides(self, **kwargs) -> "BotConfig":
         return replace(self, **kwargs)

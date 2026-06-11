@@ -36,7 +36,7 @@ def run_paper_tick(
     else:
         broker = PaperBroker(initial_cash=initial_cash, cost_bps=cfg.cost_bps)
 
-    target = compute_target_weights(prices, cfg).iloc[-1]
+    target = compute_target_weights(prices, cfg, carry=source.load_carry()).iloc[-1]
     latest = prices.iloc[-1]
     orders = broker.rebalance_to(target, latest)
     broker.save(state_path)

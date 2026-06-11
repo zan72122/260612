@@ -16,9 +16,17 @@ from finbot.data.base import DataSource
 
 
 class CSVSource(DataSource):
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, carry_path: str | Path | None = None):
         self.path = Path(path)
+        self.carry_path = Path(carry_path) if carry_path else None
 
     def load(self) -> pd.DataFrame:
         prices = pd.read_csv(self.path, index_col=0, parse_dates=True)
         return self.validate(prices)
+
+    def load_carry(self) -> pd.DataFrame | None:
+        """年率キャリーの CSV(価格と同形式、値は例: 0.03 = 年率3%)。"""
+        if self.carry_path is None:
+            return None
+        carry = pd.read_csv(self.carry_path, index_col=0, parse_dates=True)
+        return carry.sort_index().ffill()

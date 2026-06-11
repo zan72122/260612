@@ -58,7 +58,10 @@ class SyntheticSource(DataSource):
         self.seed = seed
         self.start = start
 
-    def load(self) -> pd.DataFrame:
+        self._prices: pd.DataFrame | None = None
+        self._carry: pd.DataFrame | None = None
+
+    def _generate(self) -> None:
         rng = np.random.default_rng(self.seed)
         names = list(self.universe)
         idx = [list(_ASSET_PARAMS).index(n) for n in names]
@@ -84,7 +87,30 @@ class SyntheticSource(DataSource):
         rets = mu * drift_mult + sigma * vol_mult * z
 
         dates = pd.bdate_range(self.start, periods=self.days)
-        prices = pd.DataFrame(
-            100.0 * np.exp(np.cumsum(rets, axis=0)), index=dates, columns=names
+        self._prices = self.validate(
+            pd.DataFrame(
+                100.0 * np.exp(np.cumsum(rets, axis=0)), index=dates, columns=names
+            )
         )
-        return self.validate(prices)
+
+        # 観測可能な年率キャリー: 真の期待リターンを部分的に反映するノイズ付き
+        # 観測値(AR(1))。実データでの配当利回り・ロールイールドに相当する。
+        true_carry = mu * drift_mult * 252.0
+        ar = np.zeros((self.days, n))
+        eps = rng.normal(0.0, 0.01, (self.days, n))
+        phi = 0.97
+        for t in range(1, self.days):
+            ar[t] = phi * ar[t - 1] + eps[t]
+        self._carry = pd.DataFrame(
+            0.5 * true_carry + ar, index=dates, columns=names
+        )
+
+    def load(self) -> pd.DataFrame:
+        if self._prices is None:
+            self._generate()
+        return self._prices
+
+    def load_carry(self) -> pd.DataFrame:
+        if self._carry is None:
+            self._generate()
+        return self._carry

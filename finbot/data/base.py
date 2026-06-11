@@ -17,6 +17,15 @@ class DataSource(ABC):
     def load(self) -> pd.DataFrame:
         """終値の DataFrame(index: DatetimeIndex, columns: 資産名)を返す。"""
 
+    def load_carry(self) -> pd.DataFrame | None:
+        """年率キャリー(価格が動かない場合の期待リターン)の DataFrame を返す。
+
+        形式は load() と同じ(index: 日付, columns: 資産)。t 行は t 日時点で
+        観測可能な値であること(因果性)。提供できないソースは None を返し、
+        その場合パイプラインはトレンド単独で動く。
+        """
+        return None
+
     @staticmethod
     def validate(prices: pd.DataFrame) -> pd.DataFrame:
         if not isinstance(prices.index, pd.DatetimeIndex):
