@@ -18,12 +18,15 @@
 | **ドローダウン・ブレーキ** | DD が深くなるほどエクスポージャを線形縮小し、テール損失の複利的拡大を抑制 |
 | **コスト制御**(リバランスバンド + ウェイト EWMA 平滑化) | ターンオーバーを抑えコストドラッグを削減(取引コストは 5bps でモデル化) |
 | **ウォークフォワード検証** | 「見せかけのシャープ」を排除し、アウトオブサンプルの数値だけを信頼する |
+| **リバランス・トランチング**(5 本の位相分散、`--tranches`) | リバランス日の選び方という運要素(Rebalance Timing Luck)を平均化で除去。期待リターンを変えずに分散だけ下げるフリーランチ |
+| **Yang-Zhang レンジボラ推定**(OHLC があるとき自動有効、`--no-range-vol` で無効化) | 高値・安値・始値を使う推定は終値のみより統計効率が数倍高く、ボラターゲットの分母が滑らかかつ速く真のボラに追随する |
+| **Gârleanu-Pedersen 部分調整**(`--no-gp` で無効化) | コスト存在下の最適執行(JF 2013)。エイムへ毎日一定割合だけ近づき、エイム側では減衰の遅いシグナルを過大評価。ターンオーバーを構造的に削減 |
 
 ## セットアップ
 
 ```bash
 pip install -r requirements.txt
-python -m pytest tests/ -v   # 32 テスト(先読みバイアス検証を含む)
+python -m pytest tests/ -v   # 52 テスト(先読みバイアス検証を含む)
 ```
 
 ## 使い方
@@ -40,6 +43,9 @@ python -m finbot paper --state paper_state.json
 
 # 実データ(CSV)で実行
 python -m finbot backtest --source csv --csv-path prices.csv
+
+# 新機能を無効化して従来挙動と比較
+python -m finbot walkforward --tranches 1 --no-range-vol --no-gp
 ```
 
 CSV フォーマット: 1 列目が日付、以降が資産ごとの終値。
@@ -54,11 +60,11 @@ date,EQ_US,BOND_GOV,GOLD
 ```
 finbot/
 ├── config.py        # BotConfig: 全パラメータ(自由度を意図的に小さく)
-├── data/            # DataSource 抽象化(synthetic / csv / yfinance)
-├── signals/         # 因果的モメンタムシグナル([-1, 1])
-├── risk/            # EWMA 共分散・ボラターゲット・DD ブレーキ
-├── portfolio/       # compute_target_weights: 全パイプラインの中核
-├── backtest/        # エンジン(T 日シグナル → T+1 日適用)・指標・walkforward
+├── data/            # DataSource 抽象化(synthetic / csv / yfinance、OHLC は任意提供)
+├── signals/         # 因果的モメンタムシグナル([-1, 1])+ GP 持続性重み
+├── risk/            # EWMA 共分散・Yang-Zhang レンジボラ・ボラターゲット・DD ブレーキ
+├── portfolio/       # compute_target_weights: 全パイプラインの中核 + GP 部分調整
+├── backtest/        # エンジン(T 日シグナル → T+1 日適用・トランチング)・指標・walkforward
 └── live/            # PaperBroker + 日次ティックランナー
 ```
 

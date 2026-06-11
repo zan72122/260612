@@ -32,12 +32,30 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--days", type=int, default=2520, help="合成データの日数")
     p.add_argument("--seed", type=int, default=42, help="合成データのシード")
     p.add_argument("--target-vol", type=float, default=None, help="目標年率ボラ")
+    p.add_argument(
+        "--tranches", type=int, default=None,
+        help="リバランス・トランシェ数(1 でトランチング無効)",
+    )
+    p.add_argument(
+        "--no-range-vol", action="store_true",
+        help="Yang-Zhang レンジボラ推定を無効化(終値ベースに戻す)",
+    )
+    p.add_argument(
+        "--no-gp", action="store_true",
+        help="Gârleanu-Pedersen 部分調整を無効化(EWMA 平滑化に戻す)",
+    )
 
 
 def _build_config(args: argparse.Namespace) -> BotConfig:
     cfg = BotConfig()
     if args.target_vol is not None:
         cfg = cfg.with_overrides(target_vol=args.target_vol)
+    if args.tranches is not None:
+        cfg = cfg.with_overrides(n_tranches=args.tranches)
+    if args.no_range_vol:
+        cfg = cfg.with_overrides(use_range_vol=False)
+    if args.no_gp:
+        cfg = cfg.with_overrides(gp_enabled=False)
     return cfg
 
 
@@ -62,13 +80,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "backtest":
         prices = source.load()
-        res = run_backtest(prices, cfg)
+        res = run_backtest(prices, cfg, ohlc=source.load_ohlc())
         print(format_report(res.stats, "バックテスト(インサンプル・参考値)"))
         print("\n注意: インサンプルの数値は楽観的です。walkforward の OOS 値を信頼してください。")
 
     elif args.command == "walkforward":
         prices = source.load()
-        res = run_walkforward(prices, cfg)
+        res = run_walkforward(prices, cfg, ohlc=source.load_ohlc())
         print(format_report(res.stats, "ウォークフォワード OOS(信頼すべき数値)"))
         print("\n--- フォールド詳細 ---")
         for f in res.folds:

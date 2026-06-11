@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from finbot.data.base import DataSource
+from finbot.data.base import DataSource, OHLCFrames
 
 
 class YFinanceSource(DataSource):
@@ -18,7 +18,7 @@ class YFinanceSource(DataSource):
         self.tickers = tickers
         self.period = period
 
-    def load(self) -> pd.DataFrame:
+    def _download(self) -> pd.DataFrame:
         try:
             import yfinance as yf
         except ImportError as e:
@@ -26,9 +26,24 @@ class YFinanceSource(DataSource):
                 "yfinance が必要です: pip install yfinance"
             ) from e
 
-        raw = yf.download(
+        return yf.download(
             list(self.tickers.values()), period=self.period, auto_adjust=True
-        )["Close"]
+        )
+
+    def _rename(self, raw: pd.DataFrame) -> pd.DataFrame:
         inv = {v: k for k, v in self.tickers.items()}
-        prices = raw.rename(columns=inv)[list(self.tickers.keys())]
-        return self.validate(pd.DataFrame(prices))
+        return pd.DataFrame(raw.rename(columns=inv)[list(self.tickers.keys())])
+
+    def load(self) -> pd.DataFrame:
+        return self.validate(self._rename(self._download()["Close"]))
+
+    def load_ohlc(self) -> OHLCFrames:
+        raw = self._download()
+        close = self.validate(self._rename(raw["Close"]))
+        ohlc = OHLCFrames(
+            open=self._rename(raw["Open"]),
+            high=self._rename(raw["High"]),
+            low=self._rename(raw["Low"]),
+            close=close,
+        )
+        return ohlc.aligned_to(close)

@@ -17,6 +17,7 @@ import pandas as pd
 from finbot.backtest.engine import run_backtest
 from finbot.backtest.metrics import summary
 from finbot.config import BotConfig
+from finbot.data.base import OHLCFrames
 
 DEFAULT_GRID: tuple[dict, ...] = (
     {"momentum_lookbacks": (21, 63, 126, 252)},
@@ -40,6 +41,7 @@ def run_walkforward(
     train_days: int = 756,
     test_days: int = 252,
     grid: tuple[dict, ...] = DEFAULT_GRID,
+    ohlc: OHLCFrames | None = None,
 ) -> WalkForwardResult:
     oos_parts: list[pd.Series] = []
     folds: list[dict] = []
@@ -47,19 +49,21 @@ def run_walkforward(
     start = 0
     while start + train_days + test_days <= len(prices):
         train = prices.iloc[start : start + train_days]
+        train_ohlc = ohlc.window(start, start + train_days) if ohlc is not None else None
         # テスト窓にはシグナルのウォームアップ用の履歴を前置する
         test_begin = start + train_days
         ctx_begin = max(0, test_begin - cfg.warmup - 5)
         test_ctx = prices.iloc[ctx_begin : test_begin + test_days]
+        ctx_ohlc = ohlc.window(ctx_begin, test_begin + test_days) if ohlc is not None else None
 
         best_sharpe, best_params = -float("inf"), grid[0]
         for params in grid:
-            res = run_backtest(train, cfg.with_overrides(**params))
+            res = run_backtest(train, cfg.with_overrides(**params), ohlc=train_ohlc)
             if res.stats["sharpe"] > best_sharpe:
                 best_sharpe, best_params = res.stats["sharpe"], params
 
         oos_cfg = cfg.with_overrides(**best_params)
-        oos_res = run_backtest(test_ctx, oos_cfg)
+        oos_res = run_backtest(test_ctx, oos_cfg, ohlc=ctx_ohlc)
         oos = oos_res.returns.loc[prices.index[test_begin] :]
         oos_parts.append(oos)
         folds.append(

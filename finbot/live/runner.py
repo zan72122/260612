@@ -27,6 +27,7 @@ def run_paper_tick(
 ) -> tuple[PaperBroker, list[Order], pd.Series]:
     """最新データで目標ウェイトを計算し、ペーパーブローカで執行する。"""
     prices = source.load()
+    ohlc = source.load_ohlc()  # 提供がなければ None(終値ベースに自動フォールバック)
     if len(prices) < cfg.warmup + 1:
         raise ValueError(f"履歴不足: 最低 {cfg.warmup + 1} 営業日の価格が必要")
 
@@ -36,7 +37,7 @@ def run_paper_tick(
     else:
         broker = PaperBroker(initial_cash=initial_cash, cost_bps=cfg.cost_bps)
 
-    target = compute_target_weights(prices, cfg).iloc[-1]
+    target = compute_target_weights(prices, cfg, ohlc=ohlc).iloc[-1]
     latest = prices.iloc[-1]
     orders = broker.rebalance_to(target, latest)
     broker.save(state_path)

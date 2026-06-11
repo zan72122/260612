@@ -48,7 +48,25 @@ class BotConfig:
     # 執行・コスト
     cost_bps: float = 5.0          # 片道取引コスト(bps)
     rebalance_band: float = 0.05   # 目標との最大乖離がこれ以下なら取引しない
-    weight_smooth_span: int = 5    # 目標ウェイトの EWMA 平滑化(ターンオーバー抑制)
+    weight_smooth_span: int = 5    # 目標ウェイトの EWMA 平滑化(gp_enabled=False 時のみ)
+
+    # リバランス・トランチング(タイミング運の除去)
+    # ポートフォリオを n_tranches 本に分割し、各トランシェは n_tranches 日
+    # 周期の異なる位相でのみリバランスする。平均化により「リバランス日の
+    # 選び方」という運要素を除去し、リターン期待値を変えずに分散を下げる。
+    n_tranches: int = 5
+
+    # レンジベース・ボラ推定(Yang-Zhang)
+    # OHLC が利用可能なとき、終値リターンより統計効率が数倍高い
+    # Yang-Zhang 推定量で資産別ボラと共分散の対角成分を置き換える。
+    use_range_vol: bool = True
+
+    # Gârleanu-Pedersen 部分調整
+    # gp_trade_rate は 1 日あたりの「目標へ近づく割合」(取引速度)。
+    # コストが高いほど小さく、アルファ減衰が速いほど大きくすべき値。
+    # エイム(目標)側では減衰の遅いシグナルを 1/(1 + φ/a) で過大評価する。
+    gp_enabled: bool = True
+    gp_trade_rate: float = 0.25
 
     # 評価
     rf_rate: float = 0.0         # 年率無リスク金利(シャープ計算用)

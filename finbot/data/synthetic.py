@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from finbot.config import DEFAULT_UNIVERSE
-from finbot.data.base import DataSource
+from finbot.data.base import DataSource, OHLCFrames
 
 # 資産クラスごとの (年率ドリフト, 年率ボラ)
 _ASSET_PARAMS: dict[str, tuple[float, float]] = {
@@ -59,6 +59,59 @@ class SyntheticSource(DataSource):
         self.start = start
 
     def load(self) -> pd.DataFrame:
+        rets, _ = self._generate_log_returns()
+        names = list(self.universe)
+        dates = pd.bdate_range(self.start, periods=self.days)
+        prices = pd.DataFrame(
+            100.0 * np.exp(np.cumsum(rets, axis=0)), index=dates, columns=names
+        )
+        return self.validate(prices)
+
+    def load_ohlc(self) -> OHLCFrames:
+        """日次ログリターンを所与としたブラウン橋で日中パスを生成し OHLC を返す。
+
+        終値は load() と同一(橋のノイズは別の乱数ストリームから取る)。
+        橋の増分 e_i - mean(e) + r/m は離散ブラウン橋の標準的構成で、
+        日中の分散構造が日次リターンの分散と整合する。
+        """
+        rets, sigma_daily = self._generate_log_returns()
+        names = list(self.universe)
+        n = len(names)
+        # 1営業日あたりのサブステップ数(先頭がオーバーナイト)。5分足相当。
+        # 粗いグリッドは高値/安値を過小評価しレンジ推定に下方バイアスを与えるため、
+        # 実市場(ほぼ連続取引)に近づける目的で細かめに取る。
+        m = 78
+
+        rng = np.random.default_rng(self.seed + 7919)  # 終値の乱数列とは独立
+        e = rng.standard_normal((self.days, m, n)) * (
+            sigma_daily[:, None, :] / np.sqrt(m)
+        )
+        # 合計が日次リターン rets に一致するよう橋で拘束
+        e += (rets[:, None, :] - e.sum(axis=1, keepdims=True)) / m
+
+        log_close = np.log(100.0) + np.cumsum(rets, axis=0)
+        log_prev = np.concatenate([[np.full(n, np.log(100.0))], log_close[:-1]])
+        # path[t, j] = 前日終値 + 当日 j ステップ目までの累積(j=0 が始値)
+        path = log_prev[:, None, :] + np.cumsum(e, axis=1)
+
+        dates = pd.bdate_range(self.start, periods=self.days)
+
+        def frame(arr: np.ndarray) -> pd.DataFrame:
+            return pd.DataFrame(np.exp(arr), index=dates, columns=names)
+
+        # 終値は load() と厳密に一致させ、高値/安値はそれを包含するよう拘束
+        return OHLCFrames(
+            open=frame(path[:, 0, :]),
+            high=frame(np.maximum(path.max(axis=1), log_close)),
+            low=frame(np.minimum(path.min(axis=1), log_close)),
+            close=frame(log_close),
+        )
+
+    def _generate_log_returns(self) -> tuple[np.ndarray, np.ndarray]:
+        """日次ログリターン (days×n) と日次ボラ (days×n) を返す。
+
+        乱数の消費順序を変えないこと(終値系列の再現性が壊れる)。
+        """
         rng = np.random.default_rng(self.seed)
         names = list(self.universe)
         idx = [list(_ASSET_PARAMS).index(n) for n in names]
@@ -82,9 +135,4 @@ class SyntheticSource(DataSource):
         vol_mult = np.where(regime == 1, 2.2, 1.0)[:, None]
         drift_mult = np.where(regime == 1, -1.5, 1.0)[:, None]
         rets = mu * drift_mult + sigma * vol_mult * z
-
-        dates = pd.bdate_range(self.start, periods=self.days)
-        prices = pd.DataFrame(
-            100.0 * np.exp(np.cumsum(rets, axis=0)), index=dates, columns=names
-        )
-        return self.validate(prices)
+        return rets, sigma * vol_mult
